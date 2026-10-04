@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Backpack Battles バッグ配置オプティマイザー v0.1</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;line-height:1.45}
+*{box-sizing:border-box}
+body{margin:0;background:#f5f6f8;color:#17191c}
+main{max-width:980px;margin:auto;padding:16px}
+h1{font-size:1.35rem;margin:4px 0 8px}
+h2{font-size:1.05rem;margin:22px 0 8px}
+.card{background:white;border:1px solid #d9dde3;border-radius:14px;padding:14px;margin:12px 0;box-shadow:0 1px 4px rgba(0,0,0,.04)}
+.note{font-size:.88rem;color:#59616d}
+.warn{background:#fff7e8;border-color:#ead6a8}
+.ok{background:#edf8ef;border-color:#bedbc3}
+.error{background:#fff0f0;border-color:#e1b4b4}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button,select,input{font:inherit}
+button{border:1px solid #bcc3cd;border-radius:10px;padding:9px 12px;background:#fff;cursor:pointer}
+button.primary{background:#17191c;color:#fff;border-color:#17191c}
+button:disabled{opacity:.45;cursor:not-allowed}
+.bag-list{display:grid;grid-template-columns:1fr;gap:8px}
+.bag-row{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid #e0e3e8;border-radius:12px;padding:9px}
+.bag-row.special{opacity:.62}
+.shape{display:grid;gap:2px;justify-content:center;align-content:center;min-height:54px}
+.shape span{width:13px;height:13px;border:1px solid #9ba4b0;border-radius:2px;background:#e9edf2}
+.shape span.off{border-color:transparent;background:transparent}
+.name{font-weight:650;font-size:.94rem}
+.en{font-weight:400;color:#737b86;font-size:.78rem}
+.meta{font-size:.78rem;color:#59616d}
+.counters{display:grid;grid-template-columns:auto 54px auto 54px;gap:4px;align-items:center;font-size:.8rem}
+.counters input{width:54px;padding:6px;border:1px solid #cbd1d8;border-radius:8px;text-align:center}
+.board-wrap{overflow:auto;padding-bottom:4px}
+.board{display:grid;grid-template-columns:repeat(9,minmax(30px,48px));grid-template-rows:repeat(7,minmax(30px,48px));gap:2px;min-width:286px;width:max-content;background:#b6bdc7;padding:2px;border-radius:8px}
+.cell{display:flex;align-items:center;justify-content:center;background:#fff;border-radius:3px;font-size:.67rem;font-weight:700;text-align:center;line-height:1.05;padding:1px;overflow:hidden}
+.cell.empty{background:#f4f5f7;color:#a0a6ae}
+.t0{background:#dce8f8}.t1{background:#fae4d8}.t2{background:#e2f0dc}.t3{background:#eee1f5}.t4{background:#fff0bf}.t5{background:#d9f0ee}.t6{background:#f8dce6}.t7{background:#e7e1da}.t8{background:#dfe6f6}.t9{background:#f0e6c8}.t10{background:#dcebdc}.t11{background:#eadff0}
+.result-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+.result-tabs button.active{background:#17191c;color:#fff}
+.legend{display:flex;gap:7px 12px;flex-wrap:wrap;font-size:.78rem;margin-top:10px}
+.legend span{white-space:nowrap}
+.status{font-weight:700}
+.metric{display:flex;gap:14px;flex-wrap:wrap;font-size:.86rem;margin:8px 0}
+details{margin-top:10px}
+pre{white-space:pre-wrap;font-size:.76rem;background:#f6f7f9;border-radius:8px;padding:8px}
+@media(min-width:720px){.bag-list{grid-template-columns:1fr 1fr}.board{grid-template-columns:repeat(9,48px);grid-template-rows:repeat(7,48px)}}
+</style>
+</head>
+<body>
+<main>
+<h1>Backpack Battles バッグ配置オプティマイザー <small>v0.1</small></h1>
+<p class="note">9×7盤面・90°回転可・鏡映なし。まずは手入力と配置エンジンを検証する試作版です。</p>
+
+<section class="card">
+  <div class="toolbar">
+    <button id="loadExample">今回の画像構成を入力</button>
+    <button id="clearAll">すべて0にする</button>
+    <label>空きを寄せる方向
+      <select id="direction">
+        <option value="none">指定なし</option>
+        <option value="right" selected>右</option>
+        <option value="left">左</option>
+        <option value="top">上</option>
+        <option value="bottom">下</option>
+      </select>
+    </label>
+  </div>
+  <p class="note">「所持数」は配置候補に使える数、「必須数」は絶対に残したい最低数です。v0.1では、まず所持バッグを全部置けるかを厳密に探索します。</p>
+</section>
+
+<h2>バッグ</h2>
+<div id="bagList" class="bag-list"></div>
+
+<section class="card">
+  <div class="toolbar">
+    <button id="solve" class="primary">配置を計算</button>
+    <button id="stop" disabled>探索を停止</button>
+    <label>探索上限
+      <select id="searchLimit">
+        <option value="250000">標準 25万ノード</option>
+        <option value="1500000" selected>精密 150万ノード</option>
+        <option value="8000000">深い探索 800万ノード</option>
+      </select>
+    </label>
+  </div>
+  <p id="progress" class="note">未計算</p>
+</section>
+
+<section id="resultCard" class="card" hidden>
+  <div id="status" class="status"></div>
+  <div id="metrics" class="metric"></div>
+  <div id="tabs" class="result-tabs"></div>
+  <div class="board-wrap"><div id="board" class="board"></div></div>
+  <div id="legend" class="legend"></div>
+  <button id="more" hidden>もっと見る</button>
+  <details>
+    <summary>候補の差分について</summary>
+    <p class="note">同じ種類のバッグ同士を入れ替えただけの配置は、盤面の「種類マップ」が同じになるため自動で重複除外します。局所的な小変更は低い差分スコアになり、おすすめ4案には入りにくくしています。</p>
+  </details>
+</section>
+
+<section class="card warn">
+  <strong>v0.1でまだ入れていない機能</strong>
+  <p class="note">現在配置の読み込み・バッグ固定（🔒）・「今の配置をなるべく崩さない」モード・画像認識は次段階です。まず配置エンジンとバッグ形状を検証します。</p>
+</section>
+</main>
+
+<script>
+const BAGS = [{"id":"leather_bag","ja":"革のカバン","en":"Leather Bag","class":"共通","slots":4,"cells":[[0,0],[1,0],[0,1],[1,1]],"status":"verified","note":"2×2・4スロット"},{"id":"fanny_pack","ja":"ウエストポーチ","en":"Fanny Pack","class":"共通","slots":2,"cells":[[0,0],[1,0]],"status":"verified","note":"2×1・2スロット"},{"id":"stamina_sack","ja":"スタミナバッグ","en":"Stamina Sack","class":"共通","slots":3,"cells":[[0,0],[0,1],[0,2]],"status":"verified","note":"1×3・3スロット（今回の訂正を反映）"},{"id":"holdall","ja":"旅行カバン","en":"Holdall","class":"共通","slots":6,"cells":[[0,0],[1,0],[2,0],[0,1],[1,1],[2,1]],"status":"verified","note":"3×2・6スロット"},{"id":"potion_belt","ja":"ポーションベルト","en":"Potion Belt","class":"共通","slots":4,"cells":[[0,0],[1,0],[2,0],[3,0]],"status":"verified","note":"1×4・4スロット"},{"id":"protective_purse","ja":"守護のハンドバッグ","en":"Protective Purse","class":"共通","slots":1,"cells":[[0,0]],"status":"verified","note":"1×1・1スロット"},{"id":"box_of_prosperity","ja":"財宝の箱","en":"Box of Prosperity","class":"共通","slots":4,"cells":[[0,0],[1,0],[0,1],[1,1]],"status":"verified","note":"2×2・4スロット"},{"id":"ranger_bag","ja":"レンジャーのカバン","en":"Ranger Bag","class":"レンジャー","slots":6,"cells":[[0,0],[1,0],[0,1],[1,1],[0,2],[1,2]],"status":"verified","note":"2×3・6スロット"},{"id":"duffle_bag","ja":"ダッフルバッグ","en":"Duffle Bag","class":"バーサーカー","slots":6,"cells":[[0,0],[1,0],[2,0],[0,1],[1,1],[2,1]],"status":"verified","note":"3×2・6スロット"},{"id":"scholar_bag","ja":"学者のカバン","en":"Scholar Bag","class":"メイジ","slots":6,"cells":[[0,0],[1,0],[2,0],[0,1],[1,1],[2,1]],"status":"verified","note":"3×2・6スロット"},{"id":"fire_pit","ja":"たき火台","en":"Fire Pit","class":"パイロマンサー","slots":9,"cells":[[0,0],[1,0],[2,0],[0,1],[1,1],[2,1],[0,2],[1,2],[2,2]],"status":"verified","note":"3×3・9スロット"},{"id":"offering_bowl","ja":"供物皿","en":"Offering Bowl","class":"リーパー","slots":4,"cells":[[0,0],[1,0],[0,1],[1,1]],"status":"verified","note":"2×2・4スロット"},{"id":"port_o_charger","ja":"ポート・オ・チャージャー","en":"Port-O-Charger","class":"エンジニア","slots":6,"cells":[[0,0],[1,0],[0,1],[1,1],[0,2],[1,2]],"status":"verified","note":"2×3・6スロット"},{"id":"relic_case","ja":"レリックケース","en":"Relic Case","class":"アドベンチャラー","slots":4,"cells":[[0,0],[1,0],[2,0],[3,0]],"status":"verified","note":"1×4・4スロット"},{"id":"vineweave_basket","ja":"つる織りバスケット","en":"Vineweave Basket","class":"レンジャー","slots":9,"cells":[[0,0],[1,0],[2,0],[0,1],[1,1],[2,1],[0,2],[1,2],[2,2]],"status":"verified","note":"3×3・9スロット"},{"id":"utility_pouch","ja":"便利ポーチ","en":"Utility Pouch","class":"バーサーカー","slots":8,"cells":[[0,0],[1,0],[2,0],[0,1],[1,1],[2,1],[0,2],[2,2]],"status":"icon_verified","note":"3×3外接・8スロット。現行アイコンのマス形状を照合"},{"id":"bag_of_giving","ja":"施し袋","en":"Bag of Giving","class":"アドベンチャラー","slots":6,"cells":[[0,0],[1,0],[2,0],[0,1],[1,1],[2,1]],"status":"verified","note":"3×2・6スロット"},{"id":"sewing_case","ja":"裁縫セット","en":"Sewing Case","class":"アドベンチャラー","slots":6,"cells":[[0,0],[1,0],[2,0],[3,0],[1,1],[2,1]],"status":"icon_verified","note":"4×2外接・6スロット。現行アイコンのマス形状を照合"},{"id":"box_of_cogs","ja":"歯車仕掛けの箱","en":"Box of Cogs","class":"エンジニア","slots":8,"cells":[[1,0],[2,0],[0,1],[1,1],[2,1],[3,1],[1,2],[2,2]],"status":"icon_verified","note":"4×3外接・8スロット。現行アイコンのマス形状を照合"},{"id":"puzzlebox","ja":"パズルボックス","en":"Puzzlebox","class":"メイジ","slots":6,"cells":[[2,0],[0,1],[1,1],[2,1],[1,2],[1,3]],"status":"icon_verified","note":"3×4外接・6スロット。現行アイコンのマス形状を照合"},{"id":"puzzlebag_love","ja":"愛情のパズルバッグ","en":"Puzzlebag of Love","class":"メイジ","slots":4,"cells":[[2,0],[0,1],[1,1],[2,1]],"status":"icon_verified","note":"L/J型テトロミノ・4スロット"},{"id":"puzzlebag_improvement","ja":"改善のパズルバッグ","en":"Puzzlebag of Improvement","class":"メイジ","slots":4,"cells":[[1,0],[2,0],[0,1],[1,1]],"status":"icon_verified","note":"S/Z型テトロミノ・4スロット"},{"id":"puzzlebag_ruin","ja":"破滅のパズルバッグ","en":"Puzzlebag of Ruin","class":"メイジ","slots":4,"cells":[[0,0],[1,0],[1,1],[2,1]],"status":"icon_verified","note":"S/Z型テトロミノ・4スロット"},{"id":"puzzlebag_energy","ja":"活力のパズルバッグ","en":"Puzzlebag of Energy","class":"メイジ","slots":4,"cells":[[1,0],[0,1],[1,1],[2,1]],"status":"icon_verified","note":"T型テトロミノ・4スロット"},{"id":"puzzlebag_endurance","ja":"持続のパズルバッグ","en":"Puzzlebag of Endurance","class":"メイジ","slots":4,"cells":[[0,0],[0,1],[1,1],[2,1]],"status":"icon_verified","note":"L/J型テトロミノ・4スロット"},{"id":"storage_coffin","ja":"棺型バッグ","en":"Storage Coffin","class":"リーパー","slots":8,"cells":[[0,0],[1,0],[0,1],[1,1],[0,2],[1,2],[0,3],[1,3]],"status":"verified","note":"2×4・8スロット"},{"id":"sack_of_surprises","ja":"びっくりサック","en":"Sack of Surprises","class":"共通","slots":0,"cells":[],"status":"special","note":"ゲーム開始時にランダムな初期バッグとアイテムへ置換されるため、通常配置最適化の対象外"}];
+
+const bagById = Object.fromEntries(BAGS.map(b=>[b.id,b]));
+const state = Object.fromEntries(BAGS.map(b=>[b.id,{count:0,required:0}]));
+let currentResults=[], shownCount=4, worker=null;
+
+function bounds(cells){
+  if(!cells.length) return {w:0,h:0};
+  return {w:Math.max(...cells.map(c=>c[0]))+1,h:Math.max(...cells.map(c=>c[1]))+1};
+}
+function miniShape(b){
+  if(!b.cells.length) return '<div class="shape" style="grid-template-columns:repeat(2,13px)"><span class="off"></span></div>';
+  const {w,h}=bounds(b.cells), s=new Set(b.cells.map(c=>c.join(",")));
+  let x=`<div class="shape" style="grid-template-columns:repeat(${w},13px)">`;
+  for(let y=0;y<h;y++)for(let xx=0;xx<w;xx++)x+=`<span class="${s.has(xx+","+y)?"":"off"}"></span>`;
+  return x+"</div>";
+}
+function renderList(){
+  const el=document.getElementById("bagList");
+  el.innerHTML="";
+  BAGS.forEach(b=>{
+    const row=document.createElement("div");
+    row.className="bag-row"+(b.status==="special"?" special":"");
+    row.innerHTML=`
+      ${miniShape(b)}
+      <div><div class="name">${b.ja} <span class="en">${b.en}</span></div>
+      <div class="meta">${b.class}・${b.slots}スロット・${b.note}</div></div>
+      <div class="counters">
+        <label>所持</label><input data-kind="count" data-id="${b.id}" type="number" min="0" max="30" value="${state[b.id].count}" ${b.status==="special"?"disabled":""}>
+        <label>必須</label><input data-kind="required" data-id="${b.id}" type="number" min="0" max="30" value="${state[b.id].required}" ${b.status==="special"?"disabled":""}>
+      </div>`;
+    el.appendChild(row);
+  });
+  el.querySelectorAll("input").forEach(i=>i.addEventListener("change",e=>{
+    const id=e.target.dataset.id, kind=e.target.dataset.kind;
+    let v=Math.max(0,Math.min(30,Number(e.target.value)||0));
+    if(kind==="required") v=Math.min(v,state[id].count);
+    state[id][kind]=v;
+    if(kind==="count" && state[id].required>v) state[id].required=v;
+    renderList();
+  }));
+}
+renderList();
+
+document.getElementById("clearAll").onclick=()=>{for(const id in state)state[id]={count:0,required:0};renderList();};
+document.getElementById("loadExample").onclick=()=>{
+  for(const id in state)state[id]={count:0,required:0};
+  const ex={
+    puzzlebox:1,puzzlebag_energy:2,puzzlebag_ruin:1,puzzlebag_improvement:1,
+    puzzlebag_love:3,stamina_sack:1,fanny_pack:5,leather_bag:3
+  };
+  for(const [id,n] of Object.entries(ex))state[id]={count:n,required:0};
+  renderList();
+};
+
+function workerCode(){
+return `
+const W=9,H=7,FULL=(1n<<63n)-1n;
+const BAGS=${JSON.stringify(BAGS)};
+const byId=Object.fromEntries(BAGS.map(b=>[b.id,b]));
+let stopped=false;
+onmessage=e=>{if(e.data.type==="stop"){stopped=true;return;} if(e.data.type==="solve"){stopped=false;solve(e.data);}};
+function norm(cells){
+  let mx=Math.min(...cells.map(c=>c[0])),my=Math.min(...cells.map(c=>c[1]));
+  return cells.map(([x,y])=>[x-mx,y-my]).sort((a,b)=>a[1]-b[1]||a[0]-b[0]);
+}
+function keyCells(c){return c.map(x=>x.join(",")).join(";")}
+function rotations(cells){
+  let cur=cells.map(c=>c.slice()), m=new Map();
+  for(let k=0;k<4;k++){
+    let n=norm(cur),key=keyCells(n); if(!m.has(key))m.set(key,n);
+    cur=cur.map(([x,y])=>[-y,x]);
+  }
+  return [...m.values()];
+}
+function placements(b){
+  let map=new Map();
+  for(const r of rotations(b.cells)){
+    let maxx=Math.max(...r.map(c=>c[0])),maxy=Math.max(...r.map(c=>c[1]));
+    for(let oy=0;oy<H-maxy;oy++)for(let ox=0;ox<W-maxx;ox++){
+      let mask=0n,coords=[];
+      for(const [x,y] of r){let xx=ox+x,yy=oy+y;mask|=1n<<BigInt(yy*W+xx);coords.push([xx,yy]);}
+      let k=mask.toString(); if(!map.has(k))map.set(k,{mask,coords});
+    }
+  }
+  return [...map.values()];
+}
+function popcount(x){let n=0;while(x){x&=x-1n;n++;}return n}
+function emptyInfo(sol,direction){
+  let grid=Array(63).fill(null), used=0n;
+  const typeOrder=[];
+  for(const p of sol){
+    if(!typeOrder.includes(p.id))typeOrder.push(p.id);
+    for(const [x,y] of p.coords){grid[y*W+x]=p.id;used|=1n<<BigInt(y*W+x);}
+  }
+  let empties=[];for(let i=0;i<63;i++)if(!grid[i])empties.push([i%W,Math.floor(i/W)]);
+  let es=new Set(empties.map(c=>c.join(","))), comps=[];
+  while(es.size){
+    let first=es.values().next().value;es.delete(first);let q=[first.split(",").map(Number)],c=[];
+    while(q.length){let [x,y]=q.pop();c.push([x,y]);for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){let k=(x+dx)+","+(y+dy);if(es.has(k)){es.delete(k);q.push([x+dx,y+dy]);}}}
+    comps.push(c);
+  }
+  let bbox=0,perim=0,dir=0;
+  if(empties.length){
+    let xs=empties.map(c=>c[0]),ys=empties.map(c=>c[1]);
+    bbox=(Math.max(...xs)-Math.min(...xs)+1)*(Math.max(...ys)-Math.min(...ys)+1);
+    const ss=new Set(empties.map(c=>c.join(",")));
+    for(const [x,y] of empties)for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]])if(!ss.has((x+dx)+","+(y+dy)))perim++;
+    let ax=xs.reduce((a,b)=>a+b,0)/xs.length, ay=ys.reduce((a,b)=>a+b,0)/ys.length;
+    if(direction==="right")dir=-ax; else if(direction==="left")dir=ax; else if(direction==="bottom")dir=-ay; else if(direction==="top")dir=ay;
+  }
+  return {grid,empties,components:comps.length,bbox,perim,dir,used:popcount(used)};
+}
+function qualityTuple(info){return [info.components,info.bbox,info.perim,info.dir]}
+function cmpTuple(a,b){for(let i=0;i<a.length;i++){if(a[i]!==b[i])return a[i]-b[i]}return 0}
+function diff(a,b){
+  let changed=[],types=new Set(),emptyChanged=0;
+  for(let i=0;i<63;i++)if(a.grid[i]!==b.grid[i]){
+    changed.push([i%W,Math.floor(i/W)]);
+    if(a.grid[i])types.add(a.grid[i]);if(b.grid[i])types.add(b.grid[i]);
+    if(!a.grid[i]||!b.grid[i])emptyChanged++;
+  }
+  let bbox=0;if(changed.length){let xs=changed.map(c=>c[0]),ys=changed.map(c=>c[1]);bbox=(Math.max(...xs)-Math.min(...xs)+1)*(Math.max(...ys)-Math.min(...ys)+1);}
+  let score=.45*(changed.length/63)+.25*Math.min(1,types.size/5)+.2*(bbox/63)+.1*Math.min(1,emptyChanged/8);
+  let meaningful=changed.length>=9 || bbox>=18 || types.size>=3 || emptyChanged>=5;
+  if(changed.length<=6 || (types.size<=2 && bbox<=8 && emptyChanged===0)) meaningful=false;
+  return {score,meaningful,changed:changed.length,types:types.size,bbox,emptyChanged};
+}
+function chooseRecommendations(raw,direction){
+  const dedup=new Map();
+  for(const sol of raw){
+    const info=emptyInfo(sol,direction), sig=info.grid.map(x=>x||".").join("|");
+    if(!dedup.has(sig))dedup.set(sig,{sol,info});
+  }
+  let arr=[...dedup.values()].sort((a,b)=>cmpTuple(qualityTuple(a.info),qualityTuple(b.info)));
+  if(!arr.length)return [];
+  let chosen=[arr.shift()];
+  while(arr.length && chosen.length<12){
+    let bestIdx=-1,bestVal=-1;
+    for(let i=0;i<arr.length;i++){
+      let ds=chosen.map(c=>diff(c.info,arr[i].info)),min=Math.min(...ds.map(d=>d.score));
+      let meaningful=ds.every(d=>d.meaningful);
+      if(!meaningful && chosen.length<4)continue;
+      let qualityPenalty=i/Math.max(1,arr.length)*.08;
+      let val=min-qualityPenalty;
+      if(val>bestVal){bestVal=val;bestIdx=i;}
+    }
+    if(bestIdx<0){
+      if(chosen.length>=4)break;
+      // 의미 있는差が不足する時は、無理に似た候補を4件まで埋めない
+      break;
+    }
+    chosen.push(arr.splice(bestIdx,1)[0]);
+  }
+  return chosen.map((x,i)=>({sol:x.sol,info:x.info,diffFromFirst:i?diff(chosen[0].info,x.info):null}));
+}
+function solve(msg){
+  const selected=msg.selected.filter(x=>x.count>0 && byId[x.id].cells.length);
+  if(!selected.length){postMessage({type:"done",error:"バッグが選択されていません。"});return;}
+  const nodeLimit=msg.nodeLimit, direction=msg.direction;
+  const groups=selected.map(x=>({id:x.id,count:x.count,required:x.required,area:byId[x.id].slots,placements:placements(byId[x.id])}))
+    .sort((a,b)=>a.placements.length-b.placements.length || b.area-a.area);
+  const requestedArea=groups.reduce((s,g)=>s+g.area*g.count,0);
+  const requiredArea=groups.reduce((s,g)=>s+g.area*g.required,0);
+  if(requiredArea>63){postMessage({type:"done",error:"必須バッグだけで63マスを超えています。"});return;}
+
+  let nodes=0,limitHit=false,raw=[],maxSolutions=500;
+  function fullDfs(used,counts,minIdx,sol){
+    if(stopped)return true;
+    if(++nodes>nodeLimit){limitHit=true;return true;}
+    let total=counts.reduce((a,b)=>a+b,0);
+    if(!total){raw.push(sol.map(p=>({id:p.id,copy:p.copy,coords:p.coords})));return raw.length>=maxSolutions;}
+    let best=-1,bestValid=null,bestScore=1e99;
+    for(let gi=0;gi<groups.length;gi++)if(counts[gi]>0){
+      let arr=groups[gi].placements, valid=[];
+      for(let pi=minIdx[gi];pi<arr.length;pi++)if((arr[pi].mask&used)===0n)valid.push([pi,arr[pi]]);
+      if(valid.length<counts[gi])return false;
+      let score=valid.length/counts[gi];
+      if(score<bestScore){bestScore=score;best=gi;bestValid=valid;}
+    }
+    const g=groups[best], copy=g.count-counts[best]+1;
+    // 既配置への隣接が多い候補から試す
+    bestValid.sort((aa,bb)=>{
+      function score(p){
+        let adj=0,sx=0,sy=0;
+        for(const [x,y] of p.coords){
+          sx+=x;sy+=y;
+          for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+            let xx=x+dx,yy=y+dy;
+            if(xx>=0&&xx<W&&yy>=0&&yy<H&&(used&(1n<<BigInt(yy*W+xx))))adj++;
+          }
+        }
+        let ax=sx/p.coords.length, ay=sy/p.coords.length;
+        // 隣接を優先しつつ、指定方向を空けるよう反対側から詰める
+        let directional=0;
+        if(direction==="right") directional=(W-1-ax);
+        else if(direction==="left") directional=ax;
+        else if(direction==="bottom") directional=(H-1-ay);
+        else if(direction==="top") directional=ay;
+        return adj*20+directional*3;
+      }
+      return score(bb[1])-score(aa[1]);
+    });
+    for(const [pi,p] of bestValid){
+      let nc=counts.slice();nc[best]--;
+      let nm=minIdx.slice();nm[best]=pi+1;
+      let stop=fullDfs(used|p.mask,nc,nm,sol.concat([{id:g.id,copy,coords:p.coords}]));
+      if(stop)return true;
+    }
+    return false;
+  }
+  const counts=groups.map(g=>g.count),mins=groups.map(()=>0);
+  fullDfs(0n,counts,mins,[]);
+  postMessage({type:"progress",nodes,phase:"full",found:raw.length});
+
+  if(raw.length){
+    let recs=chooseRecommendations(raw,direction);
+    postMessage({type:"done",mode:"all-fit",verified:true,requestedArea,bestArea:requestedArea,requiredArea,nodes,limitHit,solutions:recs});
+    return;
+  }
+  if(limitHit){
+    postMessage({type:"done",mode:"unknown",verified:false,requestedArea,bestArea:0,requiredArea,nodes,limitHit:true,solutions:[]});
+    return;
+  }
+
+  // 全部は置けないことが厳密に判明した場合だけ、必須数を守りつつ使用面積最大化を探索。
+  nodes=0;limitHit=false;
+  let bestArea=-1,bestRaw=[];
+  const suffixMax=Array(groups.length+1).fill(0);
+  for(let i=groups.length-1;i>=0;i--)suffixMax[i]=suffixMax[i+1]+groups[i].area*groups[i].count;
+
+  function nextGroup(gi,used,area,sol){
+    if(stopped)return;
+    if(++nodes>nodeLimit){limitHit=true;return;}
+    if(area+suffixMax[gi]<bestArea)return;
+    if(gi===groups.length){
+      if(area>bestArea){bestArea=area;bestRaw=[];}
+      if(area===bestArea && bestRaw.length<maxSolutions)bestRaw.push(sol.map(p=>({id:p.id,copy:p.copy,coords:p.coords})));
+      return;
+    }
+    const g=groups[gi], arr=g.placements;
+    function placeCopies(chosen,requiredLeft,minPi,u,s){
+      if(limitHit||stopped)return;
+      if(++nodes>nodeLimit){limitHit=true;return;}
+      if(chosen===g.count || (requiredLeft===0 && chosen>=g.required)){
+        nextGroup(gi+1,u,area+chosen*g.area,s);
+        if(chosen===g.count)return;
+        // ここで止める分岐を評価後、さらに1個置く分岐へ続く
+      }
+      if(chosen>=g.count)return;
+      let mustStill=requiredLeft;
+      let available=[];
+      for(let pi=minPi;pi<arr.length;pi++)if((arr[pi].mask&u)===0n)available.push([pi,arr[pi]]);
+      if(available.length<mustStill)return;
+      for(const [pi,p] of available){
+        placeCopies(chosen+1,Math.max(0,requiredLeft-1),pi+1,u|p.mask,s.concat([{id:g.id,copy:chosen+1,coords:p.coords}]));
+        if(limitHit)return;
+      }
+    }
+    placeCopies(0,g.required,0,used,sol);
+  }
+  nextGroup(0,0n,0,[]);
+  postMessage({type:"progress",nodes,phase:"subset",found:bestRaw.length});
+  let recs=bestRaw.length?chooseRecommendations(bestRaw,direction):[];
+  postMessage({type:"done",mode:"subset",verified:!limitHit,requestedArea,bestArea:Math.max(0,bestArea),requiredArea,nodes,limitHit,solutions:recs});
+}`;
+}
+
+function startSolve(){
+  if(worker)worker.terminate();
+  const selected=BAGS.filter(b=>b.status!=="special"&&state[b.id].count>0).map(b=>({id:b.id,...state[b.id]}));
+  if(!selected.length){alert("バッグを1つ以上選んでください。");return;}
+  const blob=new Blob([workerCode()],{type:"text/javascript"});
+  worker=new Worker(URL.createObjectURL(blob));
+  document.getElementById("solve").disabled=true;
+  document.getElementById("stop").disabled=false;
+  document.getElementById("progress").textContent="探索中…";
+  document.getElementById("resultCard").hidden=true;
+  worker.onmessage=e=>{
+    const d=e.data;
+    if(d.type==="progress")document.getElementById("progress").textContent=`探索中… ${d.nodes.toLocaleString()}ノード`;
+    if(d.type==="done"){finish(d);worker.terminate();worker=null;}
+  };
+  worker.postMessage({type:"solve",selected,direction:document.getElementById("direction").value,nodeLimit:Number(document.getElementById("searchLimit").value)});
+}
+document.getElementById("solve").onclick=startSolve;
+document.getElementById("stop").onclick=()=>{if(worker){worker.postMessage({type:"stop"});setTimeout(()=>{if(worker){worker.terminate();worker=null;document.getElementById("progress").textContent="探索を停止しました。";document.getElementById("solve").disabled=false;document.getElementById("stop").disabled=true;}},50);}};
+
+function finish(d){
+  document.getElementById("solve").disabled=false;
+  document.getElementById("stop").disabled=true;
+  const card=document.getElementById("resultCard"),status=document.getElementById("status"),metrics=document.getElementById("metrics");
+  card.hidden=false;
+  if(d.error){status.textContent=d.error;status.parentElement.classList.add("error");metrics.innerHTML="";return;}
+  if(d.mode==="all-fit"){
+    status.textContent="✅ 収納面積の最適性確認済み：選択したバッグをすべて配置できます";
+  }else if(d.verified){
+    status.textContent="✅ 収納面積の最適性確認済み：必須条件を守った最大面積を証明しました";
+  }else{
+    status.textContent="⚠️ 暫定結果：探索上限に達したため、最適性はまだ証明できていません";
+  }
+  metrics.innerHTML=`<span>使用 ${d.bestArea}/63マス</span><span>空き ${63-d.bestArea}マス</span><span>探索 ${d.nodes.toLocaleString()}ノード</span><span>候補 ${d.solutions.length}案</span>`;
+  document.getElementById("progress").textContent=d.verified?`完了：${d.nodes.toLocaleString()}ノードを評価`:`上限到達：${d.nodes.toLocaleString()}ノード`;
+  currentResults=d.solutions||[];shownCount=Math.min(4,currentResults.length);renderTabs();
+}
+function renderTabs(){
+  const tabs=document.getElementById("tabs"),more=document.getElementById("more");tabs.innerHTML="";
+  for(let i=0;i<shownCount;i++){
+    const b=document.createElement("button");b.textContent=`候補 ${i+1}`;b.onclick=()=>showResult(i);tabs.appendChild(b);
+  }
+  more.hidden=shownCount>=currentResults.length;
+  if(currentResults.length)showResult(0);else{
+    document.getElementById("board").innerHTML="";
+    document.getElementById("legend").innerHTML='<span class="note">表示できる配置候補がありません。探索上限を上げて再計算してください。</span>';
+  }
+}
+document.getElementById("more").onclick=()=>{shownCount=Math.min(currentResults.length,shownCount+4);renderTabs();};
+
+function showResult(idx){
+  [...document.getElementById("tabs").children].forEach((b,i)=>b.classList.toggle("active",i===idx));
+  const r=currentResults[idx],board=document.getElementById("board"),legend=document.getElementById("legend");board.innerHTML="";legend.innerHTML="";
+  const cells=Array(63).fill(null), typeOrder=[];
+  for(const p of r.sol){
+    if(!typeOrder.includes(p.id))typeOrder.push(p.id);
+    for(const [x,y] of p.coords)cells[y*9+x]=p;
+  }
+  for(let i=0;i<63;i++){
+    const d=document.createElement("div"),p=cells[i];
+    if(!p){d.className="cell empty";d.textContent="空";}
+    else{
+      const ti=typeOrder.indexOf(p.id)%12,b=bagById[p.id];
+      d.className=`cell t${ti}`;d.textContent=abbr(b.ja)+p.copy;d.title=`${b.ja} #${p.copy}`;
+    }
+    board.appendChild(d);
+  }
+  for(const id of typeOrder){
+    const b=bagById[id],count=Math.max(...r.sol.filter(p=>p.id===id).map(p=>p.copy));
+    const s=document.createElement("span");s.textContent=`${abbr(b.ja)}＝${b.ja} ×${count}`;legend.appendChild(s);
+  }
+  const extra=document.createElement("span");extra.className="note";
+  extra.textContent=`空白：${r.info.empties.length}マス / 連結成分：${r.info.components}`+(r.diffFromFirst?` / 候補1との差：${r.diffFromFirst.changed}マス・${r.diffFromFirst.types}種類`:"");
+  legend.appendChild(extra);
+}
+function abbr(ja){
+  const m={
+    "革のカバン":"革","ウエストポーチ":"腰","スタミナバッグ":"ス","旅行カバン":"旅","ポーションベルト":"薬",
+    "守護のハンドバッグ":"守","財宝の箱":"財","レンジャーのカバン":"レ","ダッフルバッグ":"ダ","学者のカバン":"学",
+    "たき火台":"火","供物皿":"供","ポート・オ・チャージャー":"充","レリックケース":"遺","つる織りバスケット":"籠",
+    "便利ポーチ":"便","施し袋":"施","裁縫セット":"裁","歯車仕掛けの箱":"歯","パズルボックス":"箱",
+    "愛情のパズルバッグ":"愛","改善のパズルバッグ":"改","破滅のパズルバッグ":"破","活力のパズルバッグ":"活",
+    "持続のパズルバッグ":"持","棺型バッグ":"棺"
+  };return m[ja]||ja[0];
+}
+</script>
+</body>
+</html>
